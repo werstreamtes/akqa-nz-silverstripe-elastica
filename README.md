@@ -277,6 +277,48 @@ To run a full reindex of Elastica use
 ./vendor/bin/sake dev/tasks/ElasticaReindexTask
 ```
 
+## Subsite support
+
+Our typical setup is to add `SubsiteID` as an indexed_field.
+
+```yml
+  indexed_fields:
+    - ..
+    - SubsiteID
+```
+
+And filter by this at query time.
+
+```php
+$query = new \Elastica\Query();
+$bool = new \Elastica\Query\BoolQuery();
+
+$match = new \Elastica\Query\MultiMatch();
+$match
+    ->setQuery(strval($searchString))
+    ->setFields($this->getESFields())
+    ->setType('most_fields')
+    ->setFuzziness('AUTO');
+$bool->addMust($match);
+
+$subsiteId = SubsiteState::singleton()->getSubsiteId();
+
+if ($subsiteId) {
+    $bool->addFilter(
+        new \Elastica\Query\Term(['SubsiteID' => $subsiteId])
+    );
+} else {
+    $bool->addFilter(
+        new \Elastica\Query\Term(['SubsiteID' => 0])
+    );
+}
+
+...
+```
+
+At indexing time
+
+
 ## Using Queues
 
 You can make use of queues to have your reindex processes run in the background.

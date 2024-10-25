@@ -421,15 +421,24 @@ class ElasticaService
                 Versioned::set_stage(Versioned::LIVE);
 
                 foreach ($this->getIndexedClasses() as $class) {
-                    foreach (DataObject::get($class) as $record) {
-                        // Only index records with Show In Search enabled, or those that don't expose that fielid
+                    $list = DataObject::get($class);
+
+                    $this->printMessage($list->count(), sprintf('FOUND %s records of type %s', $list->count(), $class));
+
+                    $records = $list->chunkedFetch();
+                    foreach ($records as $record) {
+                        // Only index records with Show In Search enabled, or those that don't expose that field
                         if (!$record->hasField('ShowInSearch') || $record->ShowInSearch) {
                             if ($this->index($record)) {
                                 $this->printActionMessage($record, 'INDEXED');
+                            } else {
+                                $this->printActionMessage($record, 'ERROR INDEXING');
                             }
                         } else {
                             if ($this->remove($record)) {
                                 $this->printActionMessage($record, 'REMOVED');
+                            } else {
+                                $this->printActionMessage($record, 'ERROR REMOVING');
                             }
                         }
                     }
@@ -469,6 +478,15 @@ class ElasticaService
             print "{$action}: {$documentDetails}\n";
         } else {
             print "<strong>{$action}: </strong>{$documentDetails}<br>";
+        }
+    }
+
+    protected function printMessage(string $details, string $action)
+    {
+        if (Director::is_cli()) {
+            print "{$action}: {$details}\n";
+        } else {
+            print "<strong>{$action}: </strong>{$details}<br>";
         }
     }
 

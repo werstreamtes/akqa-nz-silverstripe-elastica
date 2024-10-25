@@ -5,7 +5,6 @@ namespace Heyday\Elastica;
 use SilverStripe\Control\Director;
 use SilverStripe\Control\HTTPRequest;
 use SilverStripe\Dev\BuildTask;
-
 /**
  * Defines and refreshes the elastic search index.
  */
@@ -43,6 +42,10 @@ class ReindexTask extends BuildTask
      */
     public function run($request)
     {
+        if (class_exists('\SilverStripe\Subsites\Model\Subsite')) {
+            \SilverStripe\Subsites\Model\Subsite::disable_subsite_filter(true);
+        }
+
         $message = function ($content) {
             print(Director::is_cli() ? "$content\n" : "<p>$content</p>");
         };
