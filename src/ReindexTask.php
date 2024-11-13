@@ -50,6 +50,12 @@ class ReindexTask extends BuildTask
             print(Director::is_cli() ? "$content\n" : "<p>$content</p>");
         };
 
+        $withBatch = (bool) $request->getVar('batch');
+        if ($withBatch) {
+            $message('batch processing is enabled to speed up the reindexing process');
+            $this->service->enableBatch();
+        }
+
         $message('Defining the mappings');
         $recreate = (bool) $request->getVar('recreate');
         $this->service->define($recreate);

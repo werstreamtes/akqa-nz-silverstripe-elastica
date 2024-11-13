@@ -69,6 +69,11 @@ class ElasticaService
      */
     protected $batches = [];
 
+    /**
+     * @var bool
+     */
+    protected $enableBatch = false;
+
     public const UPDATES = 'updates';
 
     public const DELETES = 'deletes';
@@ -84,7 +89,7 @@ class ElasticaService
      */
     public function __construct(
         Client $client,
-        $indexName,
+               $indexName,
         LoggerInterface $logger = null,
         $indexingMemory = null,
         $searchableExtensionClassName = Searchable::class
@@ -232,7 +237,7 @@ class ElasticaService
      */
     protected function isBatching()
     {
-        return !empty($this->batches);
+        return (!empty($this->batches) || $this->enableBatch);
     }
 
     /**
@@ -263,36 +268,38 @@ class ElasticaService
     /**
      * Process a batch update
      *
-     * @param  Document[][][] $batch List of updates for this batch, grouped by type
+     * @param  Document[][][] $batches List of updates for this batch, grouped by type
      * @return int Number of documents updated in this batch
      */
-    protected function flushBatch($batch)
+    protected function flushBatch($batches)
     {
         $documentsProcessed = 0;
 
         // process batches
         $index = null;
-        foreach ($batch as $type => $changes) {
-            foreach ($changes as $action => $documents) {
-                if (empty($documents)) {
-                    continue;
-                }
-                $index = $index ?: $this->getIndex();
-                $documentsProcessed += count($documents);
+        foreach ($batches as $batch) {
+            foreach ($batch as $type => $changes) {
+                foreach ($changes as $action => $documents) {
+                    if (empty($documents)) {
+                        continue;
+                    }
+                    $index = $index ?: $this->getIndex();
+                    $documentsProcessed += count($documents);
 
-                switch ($action) {
-                    case self::UPDATES:
-                        $index->addDocuments($documents);
-                        break;
-                    case self::DELETES:
-                        try {
-                            $index->deleteDocuments($documents);
-                        } catch (NotFoundException $ex) {
-                            // no-op if not found
-                        }
-                        break;
-                    default:
-                        throw new LogicException("Invalid batch action {$action}");
+                    switch ($action) {
+                        case self::UPDATES:
+                            $index->addDocuments($documents);
+                            break;
+                        case self::DELETES:
+                            try {
+                                $index->deleteDocuments($documents);
+                            } catch (NotFoundException $ex) {
+                                // no-op if not found
+                            }
+                            break;
+                        default:
+                            throw new LogicException("Invalid batch action {$action}");
+                    }
                 }
             }
         }
@@ -410,6 +417,14 @@ class ElasticaService
     }
 
     /**
+     * Enable batch processing
+     */
+    public function enableBatch()
+    {
+        $this->enableBatch = true;
+    }
+
+    /**
      * Re-indexes each record in the index.
      *
      * @throws Exception
@@ -419,26 +434,44 @@ class ElasticaService
         Versioned::withVersionedMode(
             function () {
                 Versioned::set_stage(Versioned::LIVE);
-
+                $maxRecordsPerBatch = 1000;
                 foreach ($this->getIndexedClasses() as $class) {
                     $list = DataObject::get($class);
-
-                    $this->printMessage($list->count(), sprintf('FOUND %s records of type %s', $list->count(), $class));
-
+                    $maxCount = $list->count();
+                    $this->printMessage($maxCount, sprintf('FOUND %s records of type %s', $maxCount, $class));
+                    $time = microtime(true);
+                    $count = 0;
+                    $recordCount = 0;
                     $records = $list->chunkedFetch();
                     foreach ($records as $record) {
+                        $count++;
+                        $recordCount++;
                         // Only index records with Show In Search enabled, or those that don't expose that field
                         if (!$record->hasField('ShowInSearch') || $record->ShowInSearch) {
                             if ($this->index($record)) {
-                                $this->printActionMessage($record, 'INDEXED');
+                                if (!$this->enableBatch) {
+                                    $this->printActionMessage($record, 'INDEXED');
+                                }
                             } else {
                                 $this->printActionMessage($record, 'ERROR INDEXING');
                             }
                         } else {
                             if ($this->remove($record)) {
-                                $this->printActionMessage($record, 'REMOVED');
+                                if (!$this->enableBatch) {
+                                    $this->printActionMessage($record, 'REMOVED');
+                                }
                             } else {
                                 $this->printActionMessage($record, 'ERROR REMOVING');
+                            }
+                        }
+                        // send to batch if enabled
+                        if ($this->enableBatch) {
+                            if (($recordCount >= $maxRecordsPerBatch) || ($count >= $maxCount)) {
+                                $docsProcessed = $this->flushBatch($this->batches);
+                                $thisTime = microtime(true);
+                                $this->printMessage($thisTime - $time, sprintf('INDEXED %s records of type %s in %s seconds', $count, $class, $thisTime - $time));
+                                $recordCount = 0;
+                                $this->batches = [];
                             }
                         }
                     }
