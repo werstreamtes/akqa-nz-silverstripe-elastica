@@ -53,7 +53,7 @@ class ReindexTask extends BuildTask
         $withBatch = (bool) $request->getVar('batch');
         if ($withBatch) {
             $message('batch processing is enabled to speed up the reindexing process');
-            $this->service->enableBatch();
+            //$this->service->enableBatch();
         }
 
         $message('Defining the mappings');
@@ -61,6 +61,6 @@ class ReindexTask extends BuildTask
         $this->service->define($recreate);
 
         $message('Refreshing the index');
-        $this->service->refresh();
+        $this->service->refresh($withBatch);
     }
 }
